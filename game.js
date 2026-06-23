@@ -71,20 +71,19 @@
   //   - the floor / ash bed, the same shape dropped down by wallH.
   // The visible back wall is the band between their far (upper) halves.
   function computeScene() {
-    const SQUISH = 0.56;                 // vertical foreshortening
-    const RX = Math.min(W * 0.45, H * 0.60);
+    const SQUISH = 0.54;                 // vertical foreshortening
+    const RX = Math.min(W * 0.49, H * 0.72);   // a big, generous hearth
     const RY = RX * SQUISH;
     const cx = W / 2;
-    const cyRim = H * 0.45;               // rim ellipse centre
-    const stoneT = RX * 0.16;            // stone ring thickness
+    const cyRim = H * 0.47;               // rim ellipse centre
+    const stoneT = RX * 0.13;            // stone ring thickness
     const innerRX = RX - stoneT;
     const innerRY = RY - stoneT * SQUISH;
 
-    // The ash bed: a smaller, flatter ellipse set down inside the pit,
-    // so the front stones sit in front of it and a low back wall shows.
-    const floorRX = innerRX * 0.90;
-    const floorRY = innerRY * 0.60;
-    const floorCy = cyRim + RY * 0.40;
+    // A large ash bed filling most of the pit floor, with a low back wall.
+    const floorRX = innerRX * 0.95;
+    const floorRY = innerRY * 0.72;
+    const floorCy = cyRim + RY * 0.30;
 
     scene.cx = cx;
     scene.RX = RX; scene.RY = RY;
@@ -94,11 +93,12 @@
     scene.floorCy = floorCy;
     scene.floorRX = floorRX; scene.floorRY = floorRY;
 
-    const coalR = floorRX * 0.34;
+    const coalR = floorRX * 0.19;             // a smaller, cuter coal
     scene.coalR = coalR;
-    scene.restY = floorCy - floorRY * 0.12;   // nestled toward the back-centre
-    scene.bedRX = floorRX - coalR * 0.55;
-    scene.bedRY = floorRY - coalR * 0.28;
+    scene.restY = floorCy - floorRY * 0.04;   // rests near the bed's centre
+    // The coal may roam almost the whole bed (well above the middle).
+    scene.bedRX = floorRX - coalR * 0.6;
+    scene.bedRY = floorRY - coalR * 0.8;
     scene.bedCy = floorCy;
 
     layoutEmbers();
@@ -155,11 +155,11 @@
   function layoutEmbers() {
     const { cx, floorCy, floorRX, floorRY, coalR } = scene;
     const spots = [
-      { dx: -0.55, dy: 0.20, s: 0.42 },
-      { dx: 0.58, dy: 0.16, s: 0.46 },
-      { dx: -0.18, dy: 0.5, s: 0.30 },
-      { dx: 0.30, dy: 0.52, s: 0.33 },
-      { dx: 0.06, dy: -0.32, s: 0.26 },
+      { dx: -0.58, dy: 0.34, s: 0.62 },
+      { dx: 0.60, dy: 0.30, s: 0.68 },
+      { dx: -0.20, dy: 0.62, s: 0.46 },
+      { dx: 0.26, dy: 0.64, s: 0.50 },
+      { dx: 0.05, dy: -0.40, s: 0.40 },
     ];
     embers.length = 0;
     for (const sp of spots) {
@@ -382,7 +382,7 @@
     pointer.x = p.x; pointer.y = p.y;
     pointer.samples = [{ x: p.x, y: p.y, t: performance.now() }];
     registerInput();
-    if (Math.hypot(p.x - coal.x, p.y - coal.y) <= coal.r * 1.5) {
+    if (Math.hypot(p.x - coal.x, p.y - coal.y) <= Math.max(coal.r * 1.8, 48)) {
       coal.held = true; coal.grounded = false; coal.vx = coal.vy = 0;
       pointer.grabX = coal.x - p.x; pointer.grabY = coal.y - p.y;
       canvas.classList.add("grabbing");
@@ -467,9 +467,9 @@
   //  Physics — a shallow bowl seen from above: friction, gentle
   //  centering, and bouncing off the elliptical pit wall.
   // ---------------------------------------------------------------
-  const FRICTION = 0.16;   // velocity kept per second
-  const CENTER = 2.2;      // gentle pull back to the cozy middle
-  const REST = 0.6;        // wall restitution
+  const FRICTION = 0.36;   // velocity kept per second (livelier, bouncier play)
+  const HOMING = 2.6;      // gentle roll back toward the cozy middle (when slow)
+  const REST = 0.62;       // wall restitution
   let settledWasMoving = false;
 
   function physics(dt) {
@@ -493,9 +493,12 @@
       return;
     }
 
-    // Bowl centering toward the resting spot + friction.
-    coal.vx += (cx - coal.x) * CENTER * dt;
-    coal.vy += (restY - coal.y) * CENTER * dt;
+    // Gentle homing — barely there at speed (flicks stay responsive),
+    // but once he's slowed he rolls cozily back toward the middle.
+    const sp0 = Math.hypot(coal.vx, coal.vy);
+    const homeScale = clamp(1 - sp0 / 320, 0, 1);
+    coal.vx += (cx - coal.x) * HOMING * homeScale * dt;
+    coal.vy += (restY - coal.y) * HOMING * homeScale * dt;
     const fr = Math.pow(FRICTION, dt);
     coal.vx *= fr; coal.vy *= fr;
 
@@ -694,13 +697,15 @@
     drawRim(false);          // far (back) stones
     drawPitInterior(warm);
     drawAshFloor(warm, pulse);
-    drawCoalShadow();
+    drawSmoke(true);         // smoke wisp behind the coal
+    drawRim(true);           // near (front) stones
+    // The pet and his friends live in the ash and are always fully
+    // visible — never clipped by the front stones.
     drawEmbers(pulse, warm);
-    drawAmbient();
-    drawSmoke(true);         // smoke behind the coal
+    drawCoalShadow();
     drawCoal(pulse, warm);
     drawParticles();
-    drawRim(true);           // near (front) stones, on top of the bed
+    drawAmbient();           // floating sparks drift over everything
     drawSmoke(false);        // a wisp drifting up in front
 
     // soft vignette
@@ -728,32 +733,56 @@
       const ox1 = cx + Math.cos(b1) * RX * ov, oy1 = cyRim + Math.sin(b1) * RY * ov;
       const ox0 = cx + Math.cos(b0) * RX * ov, oy0 = cyRim + Math.sin(b0) * RY * ov;
 
-      ctx.beginPath();
-      ctx.moveTo(ix0, iy0); ctx.lineTo(ix1, iy1);
-      ctx.lineTo(ox1, oy1); ctx.lineTo(ox0, oy0);
-      ctx.closePath();
+      const pts = [[ix0, iy0], [ix1, iy1], [ox1, oy1], [ox0, oy0]];
+      const round = scene.stoneT * 0.26;
 
-      // shade: stones catch a little more light on the near/lower side
+      // soft drop shadow so the stones feel chunky and sit on the rim
+      ctx.save();
+      ctx.shadowColor = "rgba(0,0,0,0.45)";
+      ctx.shadowBlur = scene.stoneT * 0.5;
+      ctx.shadowOffsetY = scene.stoneT * 0.12;
+      roundPoly(pts, round);
+      ctx.fillStyle = COL.stoneDark;
+      ctx.fill();
+      ctx.restore();
+
+      // body, lit a touch more on the near (lower) side
       const lightFace = clamp(0.5 + Math.sin(amid) * 0.5, 0, 1);
-      const base = lerp(38, 70, lightFace) * v.sh;
+      const base = lerp(46, 78, lightFace) * v.sh;
+      roundPoly(pts, round);
       const g = ctx.createLinearGradient(ix0, iy0, ox0, oy0);
-      g.addColorStop(0, `rgb(${(base + 14) | 0},${(base + 8) | 0},${(base + 4) | 0})`);
-      g.addColorStop(1, `rgb(${base * 0.6 | 0},${base * 0.52 | 0},${base * 0.46 | 0})`);
+      g.addColorStop(0, `rgb(${(base + 20) | 0},${(base + 13) | 0},${(base + 8) | 0})`);
+      g.addColorStop(1, `rgb(${base * 0.55 | 0},${base * 0.48 | 0},${base * 0.42 | 0})`);
       ctx.fillStyle = g;
       ctx.fill();
 
       ctx.lineJoin = "round";
-      ctx.lineWidth = Math.max(2.2, scene.stoneT * 0.12);
+      ctx.lineWidth = Math.max(2.4, scene.stoneT * 0.14);
       ctx.strokeStyle = COL.stoneEdge;
       ctx.stroke();
 
-      // inner-edge bevel highlight
+      // glossy bevel highlight along the inner (lit) edge
       ctx.beginPath();
-      ctx.moveTo(ix0, iy0); ctx.lineTo(ix1, iy1);
-      ctx.strokeStyle = "rgba(255,230,200,0.10)";
-      ctx.lineWidth = Math.max(1.5, scene.stoneT * 0.08);
+      ctx.moveTo(lerp(ix0, ox0, 0.06) + (ix1 - ix0) * 0.12, lerp(iy0, oy0, 0.06) + (iy1 - iy0) * 0.12);
+      ctx.lineTo(ix1 - (ix1 - ix0) * 0.12, iy1 - (iy1 - iy0) * 0.12);
+      ctx.strokeStyle = "rgba(255,232,205,0.14)";
+      ctx.lineWidth = Math.max(1.6, scene.stoneT * 0.1);
+      ctx.lineCap = "round";
       ctx.stroke();
     }
+  }
+
+  // Draw a rounded quadrilateral (cozy pebble-stone corners).
+  function roundPoly(pts, r) {
+    const n = pts.length;
+    const last = pts[n - 1], first = pts[0];
+    ctx.beginPath();
+    ctx.moveTo((last[0] + first[0]) / 2, (last[1] + first[1]) / 2);
+    for (let i = 0; i < n; i++) {
+      const corner = pts[i], next = pts[(i + 1) % n];
+      ctx.arcTo(corner[0], corner[1], (corner[0] + next[0]) / 2, (corner[1] + next[1]) / 2, r);
+    }
+    ctx.closePath();
   }
 
   // Fill the whole inside of the pit (the curved brick wall). The ash
@@ -779,7 +808,7 @@
     ctx.fillRect(cx - innerRX - 6, top - 6, innerRX * 2 + 12, innerRY * 2 + 12);
 
     // curved brick courses (concentric arcs that flatten toward the bed)
-    ctx.strokeStyle = "rgba(14,8,4,0.16)";
+    ctx.strokeStyle = "rgba(12,7,3,0.12)";
     ctx.lineWidth = Math.max(1.2, innerRX * 0.006);
     for (let c = 1; c <= 4; c++) {
       const k = c / 5;
@@ -789,8 +818,8 @@
       ctx.beginPath(); ellipse(cx, ey, erx, ery, Math.PI, TAU, false); ctx.stroke();
     }
     // vertical seams fanning down the back wall
-    for (let i = 0; i < 16; i++) {
-      const a = Math.PI + (i / 16) * Math.PI;
+    for (let i = 0; i < 13; i++) {
+      const a = Math.PI + (i / 13) * Math.PI;
       const x0 = cx + Math.cos(a) * innerRX, y0 = cyRim + Math.sin(a) * innerRY;
       const x1 = cx + Math.cos(a) * floorRX, y1 = floorCy + Math.sin(a) * floorRY;
       ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
@@ -827,9 +856,27 @@
     ctx.fillRect(cx - floorRX, floorCy - floorRY, floorRX * 2, floorRY * 2);
     ctx.restore();
 
+    // soft ash mounds for a little gentle texture
+    let rng = mulberry32(31);
+    ctx.save();
+    ctx.beginPath(); ellipse(cx, floorCy, floorRX, floorRY); ctx.clip();
+    for (let i = 0; i < 9; i++) {
+      const a = rng() * TAU, t = Math.sqrt(rng());
+      const x = cx + Math.cos(a) * floorRX * t * 0.85;
+      const y = floorCy + Math.sin(a) * floorRY * t * 0.85;
+      const rr = floorRX * (0.08 + rng() * 0.12);
+      const m = ctx.createRadialGradient(x - rr * 0.3, y - rr * 0.3, 0, x, y, rr);
+      const light = rng() > 0.5;
+      m.addColorStop(0, light ? "rgba(220,208,193,0.22)" : "rgba(70,58,50,0.18)");
+      m.addColorStop(1, "rgba(0,0,0,0)");
+      ctx.fillStyle = m;
+      ctx.beginPath(); ctx.ellipse(x, y, rr, rr * 0.6, 0, 0, TAU); ctx.fill();
+    }
+    ctx.restore();
+
     // scattered glowing embers buried in the ash
-    const rng = mulberry32(7);
-    for (let i = 0; i < 22; i++) {
+    rng = mulberry32(7);
+    for (let i = 0; i < 24; i++) {
       const a = rng() * TAU, t = Math.sqrt(rng());
       const x = cx + Math.cos(a) * floorRX * t * 0.92;
       const y = floorCy + Math.sin(a) * floorRY * t * 0.92;
@@ -1068,7 +1115,7 @@
       const ph = ((t + i * 0.5) % 1.5) / 1.5;
       const a = Math.sin(ph * Math.PI);
       ctx.globalAlpha = amount * 0.75 * a;
-      ctx.font = `700 ${Math.round(coal.r * (0.2 + i * 0.13))}px "Inter", system-ui, sans-serif`;
+      ctx.font = `700 ${Math.round(coal.r * (0.32 + i * 0.2))}px "Quicksand", system-ui, sans-serif`;
       ctx.fillText("z", x + i * coal.r * 0.24 + ph * coal.r * 0.12, y - ph * coal.r * 1.1 - i * coal.r * 0.18);
     }
     ctx.restore();

@@ -19,8 +19,8 @@ html, body {
   user-select: none;
   -webkit-tap-highlight-color: transparent;
   touch-action: none;
-  font-family: "Inter", "SF Pro Display", -apple-system, BlinkMacSystemFont,
-    "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-family: "Quicksand", "Inter", "SF Pro Display", -apple-system,
+    BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
 
 #scene {
@@ -43,8 +43,8 @@ html, body {
   max-width: min(86vw, 30rem);
   text-align: center;
   font-size: clamp(1rem, 2.6vw, 1.4rem);
-  font-weight: 400;
-  letter-spacing: 0.015em;
+  font-weight: 500;
+  letter-spacing: 0.02em;
   line-height: 1.4;
   color: var(--text-warm);
   text-shadow: 0 0 18px rgba(255, 138, 64, 0.35);

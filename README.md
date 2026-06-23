@@ -50,7 +50,9 @@ ambience, not a punishment — he's always fine.
 
 Plain HTML5 Canvas + a little CSS. Everything — the hearth, the coal, his
 face, the physics, the particles, the sound — is drawn and simulated
-procedurally in `game.js`. No frameworks, no assets, no bundler.
+procedurally in `game.js`. No frameworks, no image assets, no bundler. The
+only external asset is the free, open-source **[Quicksand](https://fonts.google.com/specimen/Quicksand)**
+font (SIL Open Font License) for the cozy floating messages.
 
 | File | What it is |
 |------|------------|
