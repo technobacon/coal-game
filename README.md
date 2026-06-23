@@ -1,8 +1,9 @@
 # Ember — a tiny cozy coal pet 🔥
 
-A single-screen digital pet: one little glowing coal living in a stone hearth.
-No menus, no stats, no goals — just calm, satisfying play with one very cute
-creature who's always happy you came to visit.
+A single-screen digital pet: one little glowing coal nestled in the ash of a
+warm, shallow stone fire-pit (seen from a cozy 3/4 angle). No menus, no stats,
+no goals — just calm, satisfying play with one very cute creature who's always
+happy you came to visit.
 
 ![Ember in his hearth](docs/screenshot.png)
 
