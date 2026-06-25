@@ -59,3 +59,10 @@ font (SIL Open Font License) for the cozy floating messages.
 | `index.html` | The single page + message/mute overlay |
 | `styles.css` | Layout, the floating message, the mute button |
 | `game.js`   | Scene rendering, physics, the coal, particles, audio |
+
+## Documentation
+
+[`docs/DESIGN.md`](docs/DESIGN.md) is the full design & technical reference:
+the design pillars, the oblique fire-pit geometry, the rendering pipeline,
+the bowl physics, a **tuning quick-reference** for every feel knob, and a
+prioritised set of **suggestions for the look, the UI and the game feel**.
