@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="52%" r="62%">
+      <stop offset="0%" stop-color="#3a2114"/>
+      <stop offset="60%" stop-color="#1c130d"/>
+      <stop offset="100%" stop-color="#120c09"/>
+    </radialGradient>
+    <radialGradient id="body" cx="40%" cy="38%" r="70%">
+      <stop offset="0%" stop-color="#7a3622"/>
+      <stop offset="55%" stop-color="#491f19"/>
+      <stop offset="100%" stop-color="#27110e"/>
+    </radialGradient>
+    <radialGradient id="glow" cx="50%" cy="52%" r="50%">
+      <stop offset="0%" stop-color="#ff8c3e" stop-opacity="0.55"/>
+      <stop offset="55%" stop-color="#ff6e28" stop-opacity="0.16"/>
+      <stop offset="100%" stop-color="#ff7828" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="soft" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="6"/>
+    </filter>
+  </defs>
+
+  <rect width="512" height="512" rx="96" fill="url(#bg)"/>
+
+  <!-- little ember friends -->
+  <g filter="url(#soft)">
+    <ellipse cx="150" cy="404" rx="30" ry="26" fill="#ff9a46" opacity="0.85"/>
+    <ellipse cx="362" cy="396" rx="34" ry="29" fill="#ff9a46" opacity="0.85"/>
+  </g>
+
+  <!-- coal glow -->
+  <circle cx="256" cy="266" r="210" fill="url(#glow)"/>
+
+  <!-- coal body (organic blob) -->
+  <path fill="url(#body)" stroke="#170a08" stroke-width="9" stroke-linejoin="round"
+    d="M256 116
+       C322 112 392 150 398 218
+       C404 276 392 320 358 356
+       C322 392 280 408 244 404
+       C190 398 132 360 118 300
+       C106 248 128 188 168 152
+       C200 124 224 118 256 116 Z"/>
+
+  <!-- glowing cracks + face -->
+  <g fill="none" stroke="#ff9646" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"
+     opacity="0.85" filter="url(#soft)">
+    <path d="M232 184 L256 140"/>
+    <path d="M134 252 L178 264"/>
+    <path d="M384 256 L336 268"/>
+    <path d="M196 318 L236 360"/>
+    <path d="M334 322 L300 360"/>
+  </g>
+  <!-- face: two smiling eyes + a smile, with a warm halo then a bright core -->
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <g stroke="#ff9632" stroke-width="20" opacity="0.9" filter="url(#soft)">
+      <path d="M196 232 q26 24 52 0"/>
+      <path d="M264 232 q26 24 52 0"/>
+      <path d="M214 300 q42 30 84 0"/>
+    </g>
+    <g stroke="#ffeec3" stroke-width="9">
+      <path d="M196 232 q26 24 52 0"/>
+      <path d="M264 232 q26 24 52 0"/>
+      <path d="M214 300 q42 30 84 0"/>
+    </g>
+  </g>
+</svg>

@@ -33,19 +33,26 @@ wrong even if it's "more game."
 
 ```
 coal-game/
-├── index.html      # single page: <canvas>, message overlay, mute button, font link
-├── styles.css      # full-bleed canvas, the floating message, the mute button
-├── game.js         # everything else: scene, physics, the coal, particles, audio
-├── README.md       # player-facing readme
+├── index.html              # single page: <canvas>, message overlay, mute button, manifest/icon/font links
+├── styles.css              # full-bleed canvas, the floating message, the mute button
+├── game.js                 # everything else: scene, physics, the coal, particles, bloom, audio
+├── manifest.webmanifest    # web-app manifest (installable)
+├── sw.js                   # tiny offline cache (service worker)
+├── icon.svg                # app icon (vector), drawn to match the coal
+├── icon-192.png            # app icon (raster, maskable)
+├── icon-512.png            # app icon (raster, maskable)
+├── README.md               # player-facing readme
 └── docs/
     ├── DESIGN.md     # this file
     └── screenshot.png
 ```
 
 No build step, no dependencies, no bundler. Open `index.html` and it runs.
-The only external asset is the **Quicksand** web font (SIL OFL) loaded from
-Google Fonts for the floating messages; everything else is drawn
-procedurally on a `<canvas>`.
+The only external *runtime* asset is the **Quicksand** web font (SIL OFL)
+loaded from Google Fonts for the floating messages (graceful fallback to a
+system sans if offline); everything else — including the app icons — is drawn
+procedurally on a `<canvas>`. Served over http(s) the app is **installable**
+and runs **offline** via a cache-first service worker.
 
 ---
 
@@ -73,6 +80,16 @@ requestAnimationFrame(frame)
 step and fling the coal through a wall. The simulation is fully
 re-evaluated each frame (no retained scene graph) — the scene is cheap
 enough that immediate-mode redraw keeps the code simple.
+
+**Hit-stop.** A hard impact sets a small `hitStop` timer (scaled by impact
+speed, max ~60 ms; zero under reduced-motion). While it's counting down the
+loop keeps *drawing* but skips `update`, with `time` advancing at 12% so the
+glow still breathes — a brief freeze that makes hard hits really land.
+
+**Lifecycle.** The loop's `requestAnimationFrame` handle is kept in `raf`. On
+`visibilitychange → hidden` the loop is cancelled (and the visit time saved);
+on return it resumes from a fresh `last`. All state is time-based, so it picks
+up cleanly and the tab uses no battery while hidden.
 
 ### Resolution / DPR
 
@@ -133,11 +150,33 @@ whole bed — well above the visual middle — without ever being clipped.
 | 5 | `drawSmoke(true)` | a wisp rising *behind* the coal |
 | 6 | `drawRim(true)` — near stones | the front rim |
 | 7 | `drawEmbers` | friends in the ash, **on top of the front stones** → never clipped |
-| 8 | `drawCoalShadow` + `drawCoal` | the pet, always fully visible |
-| 9 | `drawParticles` | impact sparks/ash over the coal |
-| 10 | `drawAmbient` | floating sparks drift over everything |
-| 11 | `drawSmoke(false)` | a front wisp |
-| 12 | vignette | focuses the eye on the warm centre |
+| 8 | `drawTrail` | hot after-image behind a fast flick, under the coal |
+| 9 | `drawCoalShadow` + `drawCoal` | the pet, always fully visible |
+| 10 | `drawParticles` | impact sparks/ash over the coal |
+| 11 | `drawAmbient` | floating sparks drift over everything |
+| 12 | `drawSmoke(false)` | a front wisp |
+| 13 | `applyBloom` | soft filmic bloom over the whole frame (before the vignette) |
+| 14 | `drawHint` | first-run animated "flick me" cue |
+| 15 | vignette | focuses the eye on the warm centre |
+
+### Bloom
+
+`applyBloom()` is the cheap, robust bloom from §14.1: a downscaled
+(`BLOOM_SCALE = 0.28`) copy of the just-rendered frame is blurred (via
+`ctx.filter`) on a small offscreen canvas, then added back over the frame
+with `globalCompositeOperation = "lighter"` at ~0.3 alpha. Bright, additive
+layers (coal glow, embers, firelight, sparks) bloom; the near-black night and
+the vignette that follows keep the edges dark. The whole pass is wrapped in
+`try/catch` and self-disables (`bloomOK = false`) if a browser can't do it,
+so the visuals never break.
+
+### Organic firelight flicker
+
+`fireFlicker()` sums a few octaves of smooth 1-D **value noise** (`vnoise`)
+into a multiplier hovering around 1.0 (≈ 0.75…1.09). It modulates the global
+`warm` term every frame, so the ash pool, the back-wall glow and the coal's
+heat all shimmer like real coals instead of breathing on a single clean sine.
+Under `prefers-reduced-motion` it returns a flat `1`.
 
 **Key decision:** the coal and embers render *after* the front stones.
 Earlier they were drawn before, so the rim clipped the coal's lower half
@@ -189,6 +228,12 @@ so it pops over the cracks. Three moods:
 Plus rosy additive cheeks, and **squash & stretch** (`sqx/sqy`, a damped
 spring) kicked on every impact along the contact normal.
 
+**Idle micro-life.** When he's calmly grounded and awake he gives an
+occasional happy **eye-smile "twinkle"** (the content arc-eyes briefly become
+laughing carets, on a randomised `blink` timer) and **breathes** on a slow
+sine scale — gentler awake, deeper and slower asleep. Both are suppressed
+under `prefers-reduced-motion`.
+
 ---
 
 ## 7. Physics — a shallow bowl, seen from above
@@ -237,13 +282,20 @@ and reflecting velocity across the true ellipse normal
 
 ## 8. Particles
 
-Three pools, all capped to bound cost:
+Four pools, all capped to bound cost:
 
 - **sparks** — bright, additive, biased upward (rising embers), gentle
   gravity, hot hues; spawned on impacts/flares/poke/reignite.
-- **ash** — soft grey puffs that rise, spread and fade; spawned on impact.
+- **ash** — soft grey puffs that rise, spread and fade; spawned on impact
+  and on the settle "plop."
 - **ambient** — lazy background motes drifting up from the bed continuously,
   flickering, for life.
+- **trail** — a short ring buffer of recent coal positions, drawn as faint
+  hot after-images while he's flicked fast (off under reduced-motion).
+
+Spark and ash spawn counts are scaled by `PARTICLE_MUL` (`0.45` under
+`prefers-reduced-motion`, else `1`) so motion-sensitive players get a calmer
+hearth.
 
 ---
 
@@ -281,12 +333,18 @@ Tiny Web Audio synth, no files, started on first gesture, behind the mute
 button:
 
 - **Hum:** two detuned sines (64/81 Hz) → lowpass, with a slow LFO — a low
-  cozy fire bed.
-- **Crackle:** short filtered noise bursts on impacts/flares.
+  cozy fire bed. It **swells gently with `energy`** (`updateHum` eases the hum
+  gain a few times a second) so a livelier hearth sounds a touch warmer.
+- **Crackle:** short filtered noise bursts on impacts/flares, plus the odd
+  randomised **pop** every couple of seconds while he's awake, so the loop
+  never feels static.
+- **Giggle:** a pitched-up two-note sine blip on big flicks, to match the
+  laughing face.
+- **Tok:** a low, woody sine thud when he caroms *hard* off the stone rim.
 - **Chime:** a soft rising sine on wake.
 
 All wrapped in `try/catch` so a missing/blocked AudioContext never breaks
-the visuals. Master gain ramps on mute.
+the visuals. Master gain ramps on mute, and the mute choice is persisted.
 
 ---
 
@@ -316,6 +374,11 @@ All the feel lives in a handful of constants near the top of each section:
 | Naps sooner / later | `SLEEP_DELAY`, `SLEEP_FADE` |
 | Chattier / quieter messages | `msgCooldown` gate, pool contents |
 | Warmer / cooler scene | the gradient stops in `drawPitInterior`, `drawAshFloor`, and `warm` in `draw` |
+| Stronger / softer bloom | the `globalAlpha` (0.3) and `BLOOM_SCALE`/blur in `applyBloom` |
+| Bigger / smaller flicker | the coefficients in `fireFlicker` |
+| Longer / shorter hit-stop | the `speed / 4200` (and wall `vn / 3000`) caps feeding `hitStop` |
+| Longer / shorter flick trail | the `spd > 540` gate and trail cap in `update` |
+| Fewer particles for reduced-motion | `PARTICLE_MUL` |
 
 ---
 
@@ -323,6 +386,26 @@ All the feel lives in a handful of constants near the top of each section:
 
 These are prioritised ideas for where Ember goes next. None are required;
 all respect the design pillars in §1.
+
+### 14.0 Shipped since first draft
+
+A good chunk of this roadmap is now in the build (✓ items below):
+
+- **Look:** soft global **bloom** pass, **animated firelight flicker** (value
+  noise), **idle micro-life** (blink "twinkle" + breathing). *(The
+  time-of-day warmth hook and depth-haze remain open.)*
+- **Game feel:** **hit-stop** on hard impacts, **after-image trail** on fast
+  flicks, a settle **"plop,"** **friend-ember personality** (wobble + rare
+  hop + pip), and a **rewarding wall carom** (fat sparks + "tok").
+- **UI / platform:** **`prefers-reduced-motion`** support (thinned particles,
+  no trail/wobble/hit-stop/haptics, flat flicker), **haptics** on mobile,
+  **installable + offline** (manifest + service worker), a **persisted mute**
+  and a one-time **animated first-run hint**, plus a **"missed you" greeting**
+  for returning visitors and an `rAF` **pause while hidden**.
+- **Audio:** the fire bed **swells with energy**, randomised **pops**, a
+  **giggle** on big flicks and a woody **"tok"** on hard caroms.
+
+The remaining un-checked ideas below are still the best next steps.
 
 ### 14.1 Look / art direction
 
@@ -409,10 +492,13 @@ all respect the design pillars in §1.
 - **Single coal only.** The chain-reaction embers are decorative, not
   physics bodies; multi-coal collisions would need broad-phase work.
 - **Web font dependency.** Quicksand loads from Google Fonts at runtime; it
-  falls back to system sans if offline. Self-host the woff2 if you want a
-  fully offline build.
-- **No persistence.** Each open is a fresh hearth (by design). The "ash
-  accumulates over time" nice-to-have from the original spec is not built.
+  falls back to system sans if offline, and the service worker caches it after
+  the first online visit. Self-host the woff2 if you want it on the very first
+  offline run too.
+- **Minimal persistence (by design).** `localStorage` remembers only mute,
+  "hint seen," and the last-visit time (for the greeting). Each open is still a
+  fresh hearth otherwise — the "ash accumulates over time" nice-to-have from
+  the original spec is intentionally not built; it would edge toward a stat.
 
 ---
 

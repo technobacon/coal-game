@@ -15,6 +15,14 @@
   const messageEl = document.getElementById("message");
   const muteBtn = document.getElementById("mute");
 
+  // Low-res offscreen buffer for a soft, filmic bloom pass (§5 of DESIGN).
+  // We blur a downscaled copy of the rendered frame and add it back so the
+  // bright, additive layers glow like real firelight.
+  const bloomCanvas = document.createElement("canvas");
+  const bloomCtx = bloomCanvas.getContext("2d");
+  const BLOOM_SCALE = 0.28;
+  let bloomOK = true;
+
   // ---------------------------------------------------------------
   //  Small helpers
   // ---------------------------------------------------------------
@@ -32,6 +40,44 @@
       r ^= r + Math.imul(r ^ (r >>> 7), 61 | r);
       return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
     };
+  }
+
+  // Motion-sensitive players get a calmer hearth: fewer particles, no
+  // idle wobble, no flick trail, gentler flicker, no haptics/hit-stop.
+  const reduceMotion = (() => {
+    try { return window.matchMedia("(prefers-reduced-motion: reduce)").matches; }
+    catch (e) { return false; }
+  })();
+  const PARTICLE_MUL = reduceMotion ? 0.45 : 1;
+
+  // Tiny, friendly persistence — only mute, "seen the hint", and the last
+  // visit time (so he can say he missed you). Never anything that reads
+  // as a stat, score, or chore.
+  const store = {
+    get(k, d) { try { const v = localStorage.getItem("ember." + k); return v == null ? d : v; } catch (e) { return d; } },
+    set(k, v) { try { localStorage.setItem("ember." + k, String(v)); } catch (e) {} },
+  };
+
+  // A gentle haptic tap on supporting devices (mobile), off for reduced-motion.
+  function haptic(ms) {
+    if (reduceMotion || !ms) return;
+    try { if (navigator.vibrate) navigator.vibrate(ms); } catch (e) {}
+  }
+
+  // Smooth 1-D value noise → organic firelight flicker (not a pure sine),
+  // so the whole pit shimmers like real coals.
+  const noiseTable = (() => { const r = mulberry32(98765); const a = []; for (let i = 0; i < 256; i++) a.push(r()); return a; })();
+  function vnoise(t) {
+    const i = Math.floor(t), f = t - i;
+    const a = noiseTable[i & 255], b = noiseTable[(i + 1) & 255];
+    const u = f * f * (3 - 2 * f);
+    return a + (b - a) * u;
+  }
+  // Layered flicker centred on ~1.0 with a small organic wobble.
+  function fireFlicker() {
+    if (reduceMotion) return 1;
+    const n = 0.5 * vnoise(time * 6.0) + 0.3 * vnoise(time * 11 + 5) + 0.2 * vnoise(time * 19 + 2);
+    return 0.92 + (n - 0.5) * 0.34;   // ≈ 0.75 … 1.09
   }
 
   // ---------------------------------------------------------------
@@ -63,6 +109,8 @@
     canvas.style.width = W + "px";
     canvas.style.height = H + "px";
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    bloomCanvas.width = Math.max(1, Math.round(canvas.width * BLOOM_SCALE));
+    bloomCanvas.height = Math.max(1, Math.round(canvas.height * BLOOM_SCALE));
     computeScene();
   }
 
@@ -129,8 +177,12 @@
     grounded: true,
     sqx: 1, sqy: 1, sqvx: 0, sqvy: 0,
     settledTime: 0,
+    blink: 0, blinkT: rand(2.5, 6),     // a cute eye-smile "twinkle" now and then
     shape: [], cracks: [],
   };
+
+  // Short after-image trail when he's flicked fast (juice; off for reduced-motion).
+  const trail = [];
 
   function buildCoalArt() {
     const rng = mulberry32(20240617);
@@ -164,11 +216,12 @@
     embers.length = 0;
     for (const sp of spots) {
       embers.push({
-        x: cx + sp.dx * floorRX,
+        x: cx + sp.dx * floorRX,     // home position (collision uses this)
         y: floorCy + sp.dy * floorRY,
         r: coalR * sp.s,
         flare: 0,
         phase: Math.random() * TAU,
+        ox: 0, oy: 0, vox: 0, voy: 0,  // little spring offset so they can wobble & hop
       });
     }
   }
@@ -181,6 +234,7 @@
   const ambient = [];
 
   function spawnSparks(x, y, n, power, hue) {
+    n = Math.max(1, Math.round(n * PARTICLE_MUL));
     for (let i = 0; i < n; i++) {
       const a = rand(0, TAU);
       const sp = rand(0.3, 1) * power;
@@ -196,6 +250,7 @@
     if (sparks.length > 420) sparks.splice(0, sparks.length - 420);
   }
   function spawnAsh(x, y, n, power) {
+    n = Math.max(1, Math.round(n * PARTICLE_MUL));
     for (let i = 0; i < n; i++) {
       const a = rand(0, TAU);
       const sp = rand(0.2, 0.8) * power;
@@ -284,6 +339,7 @@
   };
   let msgCooldown = 0;
   let msgHideTimer = null;
+  let hintActive = false;   // animated "flick me" cue, shown once on first run
   function showMessage(text, force) {
     if (!force && msgCooldown > 0) return;
     messageEl.textContent = text;
@@ -317,7 +373,16 @@
       lfo.connect(lfoG); lfoG.connect(humGain.gain);
       o1.connect(lp); o2.connect(lp); lp.connect(humGain); humGain.connect(audio.master);
       o1.start(); o2.start(); lfo.start();
+      audio.humGain = humGain;
       audio.started = true;
+    } catch (e) {}
+  }
+  // The fire bed swells gently with his energy and never sits perfectly still.
+  function updateHum() {
+    if (!audio.started || !audio.humGain || !audio.ctx) return;
+    try {
+      const target = audio.muted ? 0 : 0.026 + life.energy * 0.03;
+      audio.humGain.gain.setTargetAtTime(target, audio.ctx.currentTime, 0.5);
     } catch (e) {}
   }
   function blip(power, hot) {
@@ -353,9 +418,44 @@
       o.start(t); o.stop(t + 0.62);
     } catch (e) {}
   }
+  // A pitched-up two-note giggle to match his laughing face on big flicks.
+  function giggle() {
+    if (!audio.started || audio.muted || !audio.ctx) return;
+    try {
+      const ac = audio.ctx, t = ac.currentTime;
+      [0, 0.11].forEach((off, i) => {
+        const o = ac.createOscillator(); o.type = "sine";
+        const f = i ? 900 : 720;
+        o.frequency.setValueAtTime(f, t + off);
+        o.frequency.exponentialRampToValueAtTime(f * 1.16, t + off + 0.09);
+        const g = ac.createGain();
+        g.gain.setValueAtTime(0.0001, t + off);
+        g.gain.exponentialRampToValueAtTime(0.05, t + off + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + off + 0.14);
+        o.connect(g); g.connect(audio.master);
+        o.start(t + off); o.stop(t + off + 0.16);
+      });
+    } catch (e) {}
+  }
+  // A low, woody "tok" when he caroms hard off the stone rim.
+  function tok(power) {
+    if (!audio.started || audio.muted || !audio.ctx) return;
+    try {
+      const ac = audio.ctx, t = ac.currentTime;
+      const o = ac.createOscillator(); o.type = "sine";
+      o.frequency.setValueAtTime(190, t);
+      o.frequency.exponentialRampToValueAtTime(70, t + 0.16);
+      const g = ac.createGain();
+      g.gain.setValueAtTime(clamp(power, 0.1, 1) * 0.22, t);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.19);
+      o.connect(g); g.connect(audio.master);
+      o.start(t); o.stop(t + 0.2);
+    } catch (e) {}
+  }
   function setMuted(m) {
     audio.muted = m;
     muteBtn.classList.toggle("muted", m);
+    store.set("muted", m ? 1 : 0);
     if (audio.master) {
       try { audio.master.gain.linearRampToValueAtTime(m ? 0 : 0.6, audio.ctx.currentTime + 0.15); } catch (e) {}
     }
@@ -382,6 +482,7 @@
     pointer.x = p.x; pointer.y = p.y;
     pointer.samples = [{ x: p.x, y: p.y, t: performance.now() }];
     registerInput();
+    if (hintActive) { hintActive = false; store.set("hintSeen", 1); }
     if (Math.hypot(p.x - coal.x, p.y - coal.y) <= Math.max(coal.r * 1.8, 48)) {
       coal.held = true; coal.grounded = false; coal.vx = coal.vy = 0;
       pointer.grabX = coal.x - p.x; pointer.grabY = coal.y - p.y;
@@ -425,10 +526,13 @@
         coal.spin += rand(-6, 6);
         spawnSparks(coal.x, coal.y - coal.r * 0.4, 6, 180, 38);
         bumpEnergy(0.25);
+        haptic(8);
         if (Math.random() < 0.5) showMessage(pick(MSG.play));
       } else if (speed > 240) {
         spawnSparks(coal.x, coal.y, 10, speed * 0.18);
         bumpEnergy(0.5);
+        haptic(Math.round(clamp(6 + speed / 200, 6, 18)));
+        if (speed > 700) giggle();
         if (Math.random() < 0.6) showMessage(pick(MSG.play));
       }
     }
@@ -471,6 +575,7 @@
   const HOMING = 2.6;      // gentle roll back toward the cozy middle (when slow)
   const REST = 0.62;       // wall restitution
   let settledWasMoving = false;
+  let hitStop = 0;         // brief freeze on hard impacts so they really land
 
   function physics(dt) {
     const { cx, bedCy, bedRX, bedRY, restY } = scene;
@@ -523,6 +628,13 @@
         if (vn > 80) {
           onImpact(coal.x, coal.y, vn, false);
           kickSquash(nx, ny, Math.min(vn / 1400, 1));
+          // Reward exploring the wall: a hard carom is a satisfying event.
+          if (vn > 620) {
+            spawnSparks(coal.x, coal.y, Math.round(8 + Math.min(vn / 110, 18)), vn * 0.24, rand(28, 46));
+            tok(clamp(vn / 1500, 0.25, 1));
+            haptic(13);
+            if (Math.random() < 0.4) showMessage(pick(MSG.play));
+          }
         }
       }
     }
@@ -547,7 +659,10 @@
       coal.angle = lerp(coal.angle, 0, clamp(dt * 4, 0, 1));
       if (coal.settledTime > 0.35) {
         coal.grounded = true;
-        if (settledWasMoving && Math.random() < 0.5) showMessage(pick(MSG.rest));
+        if (settledWasMoving) {
+          plop();
+          if (Math.random() < 0.5) showMessage(pick(MSG.rest));
+        }
         settledWasMoving = false;
       }
     } else {
@@ -562,6 +677,8 @@
     spawnAsh(x, y, Math.round(3 + p * 6), speed * 0.05 + 40);
     bumpEnergy(0.18 + p * 0.2);
     blip(p, hot);
+    haptic(Math.round(clamp(4 + speed / 180, 4, 16)));
+    if (!reduceMotion) hitStop = Math.max(hitStop, clamp(speed / 4200, 0, 0.06));
     registerInput();
     for (let i = 0; i < embers.length; i++) {
       const em = embers[i];
@@ -575,14 +692,26 @@
     em.flare = Math.max(em.flare, amount);
     spawnSparks(em.x, em.y - em.r * 0.4, 6, 200, 40);
     blip(0.4, true);
+    // A bumped friend wobbles awake — and just occasionally gives a happy hop.
+    em.voy -= em.r * (amount >= 0.9 ? 7 : 4);
+    em.vox += rand(-1, 1) * em.r * 3;
+    if (amount >= 1 && Math.random() < 0.2) em.voy -= em.r * 9;
     for (let j = 0; j < embers.length; j++) {
       if (j === i) continue;
       const o = embers[j];
       if (Math.hypot(o.x - em.x, o.y - em.y) < em.r * 5) {
         const delay = 90 + Math.random() * 120;
-        setTimeout(() => { o.flare = Math.max(o.flare, amount * 0.55); }, delay);
+        setTimeout(() => { o.flare = Math.max(o.flare, amount * 0.55); o.voy -= o.r * 3; }, delay);
       }
     }
+  }
+
+  // A soft squash + ash poof + woody tap when he finally settles in the ash.
+  function plop() {
+    coal.sqvy -= 5; coal.sqvx += 3;
+    spawnAsh(coal.x, coal.y + coal.r * 0.4, 5, 70);
+    blip(0.16, false);
+    haptic(6);
   }
 
   function kickSquash(nx, ny, strength) {
@@ -605,6 +734,8 @@
   // ---------------------------------------------------------------
   let last = performance.now();
   let ambientTimer = 0, time = 0;
+  let popTimer = 2.5, audioTimer = 0;
+  let raf = 0;
 
   function update(dt) {
     if (!coal.held) life.timeSinceInput += dt;
@@ -626,7 +757,7 @@
     updateSquash(dt);
 
     // Spontaneous "alive" wobble when calmly resting & awake.
-    if (coal.grounded && !coal.held && !life.asleep && Math.random() < dt * 0.14) {
+    if (!reduceMotion && coal.grounded && !coal.held && !life.asleep && Math.random() < dt * 0.14) {
       const a = rand(0, TAU);
       coal.vx += Math.cos(a) * rand(60, 130);
       coal.vy += Math.sin(a) * rand(60, 130);
@@ -634,7 +765,38 @@
       coal.grounded = false;
     }
 
-    for (const em of embers) { em.flare = Math.max(0, em.flare - dt * 1.4); em.phase += dt * 1.5; }
+    // Idle micro-life: a happy little eye-smile "twinkle" once in a while.
+    coal.blink = Math.max(0, coal.blink - dt * 7);
+    if (!life.asleep && coal.grounded && !coal.held) {
+      coal.blinkT -= dt;
+      if (coal.blinkT <= 0) { coal.blink = 1; coal.blinkT = rand(2.8, 7); }
+    }
+
+    // Friend-embers settle on a soft spring (so wobble & hops ease home).
+    for (const em of embers) {
+      em.flare = Math.max(0, em.flare - dt * 1.4);
+      em.phase += dt * 1.5;
+      em.vox += (-120 * em.ox - 11 * em.vox) * dt;
+      em.voy += (-120 * em.oy - 11 * em.voy) * dt;
+      em.ox += em.vox * dt; em.oy += em.voy * dt;
+    }
+
+    // Short after-image trail behind a fast flick.
+    const spd = Math.hypot(coal.vx, coal.vy);
+    if (!reduceMotion && !coal.held && spd > 540) {
+      trail.push({ x: coal.x, y: coal.y, r: coal.r, life: 0.3, max: 0.3 });
+      if (trail.length > 16) trail.shift();
+    }
+    for (let i = trail.length - 1; i >= 0; i--) { trail[i].life -= dt; if (trail[i].life <= 0) trail.splice(i, 1); }
+
+    // Audio life: the bed swells with energy, with the odd soft crackle pop.
+    audioTimer -= dt;
+    if (audioTimer <= 0) { updateHum(); audioTimer = 0.4; }
+    popTimer -= dt;
+    if (popTimer <= 0) {
+      popTimer = rand(1.4, 3.8);
+      if (audio.started && !audio.muted && !life.asleep && Math.random() < 0.6) blip(rand(0.05, 0.16), Math.random() < 0.5);
+    }
 
     stepParticles(sparks, dt, true);
     stepParticles(ash, dt, false);
@@ -682,7 +844,7 @@
     const { cx, cyRim, RX, RY, innerRX, innerRY, floorCy, floorRX, floorRY } = scene;
     const pulse = 0.5 + 0.5 * Math.sin(time * (TAU / 4.2));
     const tod = timeOfDayWarmth();
-    const warm = (0.5 + life.energy * 0.5) * tod + life.igniteFlash * 0.4;
+    const warm = (0.5 + life.energy * 0.5) * tod * fireFlicker() + life.igniteFlash * 0.4;
 
     ctx.fillStyle = COL.night;
     ctx.fillRect(0, 0, W, H);
@@ -702,11 +864,19 @@
     // The pet and his friends live in the ash and are always fully
     // visible — never clipped by the front stones.
     drawEmbers(pulse, warm);
+    drawTrail();             // after-image behind a fast flick
     drawCoalShadow();
     drawCoal(pulse, warm);
     drawParticles();
     drawAmbient();           // floating sparks drift over everything
     drawSmoke(false);        // a wisp drifting up in front
+
+    // Soft filmic bloom: blur a downscaled copy of the frame back over it
+    // so the warm, additive layers glow. Applied before the vignette so the
+    // edges still fall away into the dark.
+    applyBloom();
+
+    drawHint();              // first-run "flick me" cue (over the bloom)
 
     // soft vignette
     const vg = ctx.createRadialGradient(cx, floorCy, RX * 0.5, cx, floorCy, Math.max(W, H) * 0.8);
@@ -714,6 +884,61 @@
     vg.addColorStop(1, "rgba(0,0,0,0.42)");
     ctx.fillStyle = vg;
     ctx.fillRect(0, 0, W, H);
+  }
+
+  // Soft bloom pass (see DESIGN §14.1). Cheap & robust: downscale + blur the
+  // current frame and add it back. Falls back to no-op if anything throws.
+  function applyBloom() {
+    if (!bloomOK) return;
+    try {
+      const bw = bloomCanvas.width, bh = bloomCanvas.height;
+      bloomCtx.setTransform(1, 0, 0, 1, 0, 0);
+      bloomCtx.globalCompositeOperation = "source-over";
+      bloomCtx.clearRect(0, 0, bw, bh);
+      bloomCtx.filter = "blur(" + Math.max(1, bw * 0.012).toFixed(2) + "px)";
+      bloomCtx.drawImage(canvas, 0, 0, bw, bh);
+      bloomCtx.filter = "none";
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.globalCompositeOperation = "lighter";
+      ctx.globalAlpha = 0.3;
+      ctx.imageSmoothingEnabled = true;
+      ctx.drawImage(bloomCanvas, 0, 0, bw, bh, 0, 0, canvas.width, canvas.height);
+      ctx.restore();
+    } catch (e) { bloomOK = false; }
+  }
+
+  // Faint hot after-images trailing a fast flick.
+  function drawTrail() {
+    if (!trail.length) return;
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    for (const t of trail) {
+      const a = t.life / t.max;
+      glowDot(t.x, t.y, t.r * 0.7 * a, `rgba(255,140,55,${0.16 * a})`, t.r * 1.6);
+    }
+    ctx.restore();
+  }
+
+  // A gentle, looping "flick me" cue: a soft cursor arcs away from the coal
+  // and back. Shown only on the very first visit, gone on first touch.
+  function drawHint() {
+    if (!hintActive) return;
+    const r = coal.r;
+    const cyc = (time % 2.6) / 2.6;
+    const ease = cyc < 0.5 ? cyc * 2 : 1 - (cyc - 0.5) * 2;   // 0→1→0
+    const fade = Math.sin(cyc * Math.PI);
+    const hx = coal.x - Math.cos(0.7) * r * 1.9 * ease;
+    const hy = coal.y - r * 0.25 - Math.sin(0.7) * r * 1.9 * ease;
+    ctx.save();
+    ctx.globalAlpha = 0.55 * fade;
+    glowDot(hx, hy, r * 0.16, "rgba(255,240,220,0.95)", r * 0.8);
+    ctx.beginPath();
+    ctx.arc(hx, hy, r * 0.16 + (1 - fade) * r * 0.5, 0, TAU);
+    ctx.strokeStyle = "rgba(255,240,220,0.5)";
+    ctx.lineWidth = Math.max(1.5, r * 0.03);
+    ctx.stroke();
+    ctx.restore();
   }
 
   // The elliptical ring of stones, split into far/near halves for depth.
@@ -903,10 +1128,11 @@
       const base = 0.45 + 0.2 * Math.sin(em.phase) + life.energy * 0.25;
       const lvl = clamp(base + em.flare * 0.9, 0, 1.6) * warm;
       const r = em.r;
-      glowDot(em.x, em.y, r * 0.9, `rgba(255,130,46,${0.5 * lvl})`, r * 3.2 + em.flare * r * 2);
+      const ex = em.x + em.ox, ey = em.y + em.oy;   // current (wobbled) position
+      glowDot(ex, ey, r * 0.9, `rgba(255,130,46,${0.5 * lvl})`, r * 3.2 + em.flare * r * 2);
       ctx.beginPath();
-      ctx.ellipse(em.x, em.y, r, r * 0.86, 0, 0, TAU);
-      const eg = ctx.createRadialGradient(em.x, em.y - r * 0.2, r * 0.2, em.x, em.y, r);
+      ctx.ellipse(ex, ey, r, r * 0.86, 0, 0, TAU);
+      const eg = ctx.createRadialGradient(ex, ey - r * 0.2, r * 0.2, ex, ey, r);
       eg.addColorStop(0, `rgba(255,${150 + em.flare * 80},60,1)`);
       eg.addColorStop(0.6, COL.rockMid);
       eg.addColorStop(1, COL.rockDark);
@@ -914,7 +1140,7 @@
       ctx.lineWidth = Math.max(1.5, r * 0.08);
       ctx.strokeStyle = "rgba(20,10,8,0.8)"; ctx.stroke();
       ctx.save();
-      ctx.translate(em.x, em.y);
+      ctx.translate(ex, ey);
       ctx.strokeStyle = `rgba(255,${160 + em.flare * 80},70,${(0.5 + em.flare * 0.5) * warm})`;
       ctx.lineWidth = Math.max(1, r * 0.06);
       ctx.shadowColor = COL.glowHot; ctx.shadowBlur = 6 + em.flare * 16;
@@ -966,9 +1192,13 @@
     const speed = Math.hypot(coal.vx, coal.vy);
     const moving = (speed > 200 || (coal.held && pointer.moved > 12)) && !life.asleep;
 
+    // A slow, gentle breathing scale when he's calmly resting (deeper asleep).
+    const bs = (reduceMotion || coal.held || !coal.grounded) ? 0
+      : Math.sin(time * (life.asleep ? 1.0 : 1.5)) * (life.asleep ? 0.03 : 0.014);
+
     ctx.save();
     ctx.translate(coal.x, coal.y);
-    ctx.scale(coal.sqx, coal.sqy);
+    ctx.scale(coal.sqx * (1 - bs * 0.5), coal.sqy * (1 + bs));
     ctx.rotate(coal.angle);
 
     const heat = clamp(life.energy * warm + pulse * 0.12 + life.igniteFlash * 0.5, 0, 1.4);
@@ -1061,6 +1291,11 @@
       } else if (laughing) {
         caretInto(-eyeX, eyeY, r * 0.17);
         caretInto(eyeX, eyeY, r * 0.17);
+      } else if (coal.blink > 0.4) {
+        // a happy little eye-smile "twinkle"
+        caretInto(-eyeX, eyeY, r * 0.16);
+        caretInto(eyeX, eyeY, r * 0.16);
+        arcInto(0, mouthY, r * 0.22, 0.06, 0.94);
       } else {
         arcInto(-eyeX, eyeY, r * 0.18, 0.08, 0.92);
         arcInto(eyeX, eyeY, r * 0.18, 0.08, 0.92);
@@ -1150,19 +1385,62 @@
   function frame(now) {
     let dt = (now - last) / 1000; last = now;
     if (dt > 0.05) dt = 0.05;
+    // Hit-stop: a brief freeze on hard impacts so they really land. The glow
+    // keeps breathing a touch so it never looks like a stutter.
+    if (hitStop > 0) {
+      hitStop -= dt;
+      time += dt * 0.12;
+      draw();
+      raf = requestAnimationFrame(frame);
+      return;
+    }
     time += dt;
     update(dt);
     draw();
-    requestAnimationFrame(frame);
+    raf = requestAnimationFrame(frame);
   }
 
   // ---------------------------------------------------------------
   //  Boot
   // ---------------------------------------------------------------
   window.addEventListener("resize", resize);
+
+  // Pause the loop while the tab is hidden (all state is time-based, so it
+  // resumes cleanly) and remember this visit so he can greet you next time.
+  function rememberVisit() { store.set("lastVisit", Date.now()); }
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+      rememberVisit();
+      if (raf) { cancelAnimationFrame(raf); raf = 0; }
+    } else if (!raf) {
+      last = performance.now();
+      raf = requestAnimationFrame(frame);
+    }
+  });
+  window.addEventListener("pagehide", rememberVisit);
+
+  // Restore the saved mute preference before any sound can start.
+  if (store.get("muted") === "1") { audio.muted = true; muteBtn.classList.add("muted"); }
+
   buildCoalArt();
   resize();
   coal.x = scene.cx; coal.y = scene.restY;
-  setTimeout(() => showMessage("drag and flick your little coal", true), 900);
-  requestAnimationFrame(frame);
+
+  // First visit → an animated "flick me" cue. Returning visitors get a warm
+  // greeting instead ("missed you" after a while away, otherwise just cozy).
+  const hintSeen = store.get("hintSeen") === "1";
+  const lastVisit = parseInt(store.get("lastVisit", "0"), 10) || 0;
+  const away = lastVisit ? Date.now() - lastVisit : 0;
+  setTimeout(() => {
+    if (!hintSeen) { showMessage("drag and flick your little coal", true); hintActive = true; }
+    else if (away > 45000) { showMessage(pick(MSG.wake), true); }
+    else { showMessage(pick(MSG.rest), true); }
+  }, 900);
+
+  // Installable, offline "open it for ten seconds" home-screen toy.
+  if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
+    window.addEventListener("load", () => { navigator.serviceWorker.register("sw.js").catch(() => {}); });
+  }
+
+  raf = requestAnimationFrame(frame);
 })();

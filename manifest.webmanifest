@@ -1,0 +1,17 @@
+{
+  "name": "Ember — your little coal",
+  "short_name": "Ember",
+  "description": "A tiny cozy coal pet living in a warm stone fire-pit. Flick him, light up his friends, watch him nap.",
+  "start_url": ".",
+  "scope": ".",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#100b09",
+  "theme_color": "#100b09",
+  "categories": ["games", "entertainment"],
+  "icons": [
+    { "src": "icon.svg", "type": "image/svg+xml", "sizes": "any", "purpose": "any" },
+    { "src": "icon-192.png", "type": "image/png", "sizes": "192x192", "purpose": "any maskable" },
+    { "src": "icon-512.png", "type": "image/png", "sizes": "512x512", "purpose": "any maskable" }
+  ]
+}
