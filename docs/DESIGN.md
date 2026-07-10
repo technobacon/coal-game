@@ -33,8 +33,8 @@ wrong even if it's "more game."
 
 ```
 coal-game/
-├── index.html      # single page: <canvas>, message overlay, mute button, font link
-├── styles.css      # full-bleed canvas, the floating message, the mute button
+├── index.html      # single page: <canvas>, tiny brand card, message overlay, mute button, font link
+├── styles.css      # full-bleed canvas, atmospheric backdrop, brand card, message, mute button
 ├── game.js         # everything else: scene, physics, the coal, particles, audio
 ├── README.md       # player-facing readme
 └── docs/
@@ -44,7 +44,7 @@ coal-game/
 
 No build step, no dependencies, no bundler. Open `index.html` and it runs.
 The only external asset is the **Quicksand** web font (SIL OFL) loaded from
-Google Fonts for the floating messages; everything else is drawn
+Google Fonts for the floating messages and small title card; everything else is drawn
 procedurally on a `<canvas>`.
 
 ---
@@ -127,6 +127,7 @@ whole bed — well above the visual middle — without ever being clipped.
 | # | Layer | Why here |
 |---|-------|----------|
 | 1 | night fill + warm bloom | backdrop |
+| 1a | arched kiln alcove + shelf shadow | anchors the hearth in a cozy room without adding gameplay chrome |
 | 2 | `drawRim(false)` — far stones | behind the pit |
 | 3 | `drawPitInterior` | the curved brick wall fills the whole inner ellipse (so there are never background gaps) |
 | 4 | `drawAshFloor` | ash ellipse on top of the wall; its upper edge becomes the back-wall base |
@@ -134,6 +135,7 @@ whole bed — well above the visual middle — without ever being clipped.
 | 6 | `drawRim(true)` — near stones | the front rim |
 | 7 | `drawEmbers` | friends in the ash, **on top of the front stones** → never clipped |
 | 8 | `drawCoalShadow` + `drawCoal` | the pet, always fully visible |
+| 8a | fast-flick afterimages | a short warm trail that makes motion read as tactile, then fades quickly |
 | 9 | `drawParticles` | impact sparks/ash over the coal |
 | 10 | `drawAmbient` | floating sparks drift over everything |
 | 11 | `drawSmoke(false)` | a front wisp |

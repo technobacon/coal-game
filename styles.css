@@ -1,7 +1,8 @@
 :root {
-  /* Warm charcoal backdrop matching the hearth scene */
-  --bg: #100b09;
+  /* Deep kiln-night backdrop matching the illustrated hearth scene */
+  --bg: #0d0908;
   --text-warm: #ffe9d6;
+  --ember: #ff9a43;
 }
 
 * { box-sizing: border-box; }
@@ -23,6 +24,32 @@ html, body {
     BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
 
+body::before,
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+}
+
+body::before {
+  background:
+    radial-gradient(circle at 50% 58%, rgba(255, 117, 36, 0.16), transparent 34rem),
+    radial-gradient(circle at 18% 20%, rgba(137, 67, 42, 0.18), transparent 22rem),
+    linear-gradient(180deg, rgba(255, 206, 139, 0.035), transparent 32%);
+  mix-blend-mode: screen;
+}
+
+body::after {
+  background-image:
+    linear-gradient(rgba(255,255,255,0.018) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.012) 1px, transparent 1px);
+  background-size: 42px 42px, 42px 42px;
+  mask-image: radial-gradient(circle at 50% 54%, black, transparent 72%);
+  opacity: 0.26;
+}
+
 #scene {
   position: fixed;
   inset: 0;
@@ -31,8 +58,36 @@ html, body {
   height: 100%;
   touch-action: none;
   cursor: grab;
+  z-index: 0;
 }
 #scene.grabbing { cursor: grabbing; }
+
+.brand {
+  position: fixed;
+  left: max(18px, env(safe-area-inset-left));
+  top: max(16px, env(safe-area-inset-top));
+  display: grid;
+  gap: 0.12rem;
+  color: var(--text-warm);
+  opacity: 0.58;
+  text-shadow: 0 0 18px rgba(255, 138, 64, 0.24);
+  pointer-events: none;
+  z-index: 10;
+}
+.brand strong {
+  font-size: clamp(1.7rem, 4.5vw, 3.2rem);
+  line-height: 0.92;
+  letter-spacing: -0.06em;
+}
+.brand span {
+  font-size: clamp(0.72rem, 1.8vw, 0.88rem);
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+.brand .brand-kicker {
+  color: var(--ember);
+  opacity: 0.8;
+}
 
 /* ---- Floating message (clean, modern, ~70% opacity) ---- */
 .message {
@@ -69,9 +124,10 @@ html, body {
   display: grid;
   place-items: center;
   padding: 0;
-  border: none;
+  border: 1px solid rgba(255, 226, 198, 0.1);
   border-radius: 50%;
-  background: rgba(255, 236, 220, 0.06);
+  background: rgba(28, 18, 13, 0.42);
+  backdrop-filter: blur(12px);
   color: var(--text-warm);
   opacity: 0.45;
   cursor: pointer;
@@ -89,4 +145,9 @@ html, body {
 
 @media (prefers-reduced-motion: reduce) {
   .message { transition: opacity 300ms ease; }
+}
+
+@media (max-width: 620px) {
+  .brand { opacity: 0.46; }
+  .brand span:not(.brand-kicker) { display: none; }
 }

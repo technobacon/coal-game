@@ -37,8 +37,9 @@ python3 -m http.server
 - **Little notes** drift by in clean, low‑opacity text when you play with him
   ("your little coal is having so much fun!").
 
-A small mute button in the corner toggles the soft ambient fire hum and crackle
-(synthesised with the Web Audio API — no audio files).
+A tiny, low-opacity title card and a small mute button are the only interface
+chrome. The button toggles the soft ambient fire hum and crackle (synthesised
+with the Web Audio API — no audio files).
 
 ## Design constraints (intentionally absent)
 
@@ -57,7 +58,7 @@ font (SIL Open Font License) for the cozy floating messages.
 | File | What it is |
 |------|------------|
 | `index.html` | The single page + message/mute overlay |
-| `styles.css` | Layout, the floating message, the mute button |
+| `styles.css` | Layout, atmospheric page treatment, title card, floating message and mute button |
 | `game.js`   | Scene rendering, physics, the coal, particles, audio |
 
 ## Documentation
