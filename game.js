@@ -22,6 +22,7 @@
   const lerp = (a, b, t) => a + (b - a) * t;
   const rand = (a, b) => a + Math.random() * (b - a);
   const TAU = Math.PI * 2;
+  const reducedMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
   // Deterministic little PRNG so the coal's shape & cracks stay stable.
   function mulberry32(seed) {
@@ -179,6 +180,7 @@
   const sparks = [];
   const ash = [];
   const ambient = [];
+  const trails = [];
 
   function spawnSparks(x, y, n, power, hue) {
     for (let i = 0; i < n; i++) {
@@ -210,6 +212,7 @@
     if (ash.length > 200) ash.splice(0, ash.length - 200);
   }
   function spawnAmbient() {
+    if (reducedMotion && Math.random() < 0.55) return;
     const { cx, floorCy, floorRX, floorRY, cyRim, RY } = scene;
     const a = rand(0, TAU), t = Math.sqrt(Math.random());
     ambient.push({
@@ -562,6 +565,7 @@
     spawnAsh(x, y, Math.round(3 + p * 6), speed * 0.05 + 40);
     bumpEnergy(0.18 + p * 0.2);
     blip(p, hot);
+    if (speed > 520 && navigator.vibrate && !reducedMotion) navigator.vibrate(clamp(speed / 130, 6, 18));
     registerInput();
     for (let i = 0; i < embers.length; i++) {
       const em = embers[i];
@@ -625,6 +629,12 @@
     physics(dt);
     updateSquash(dt);
 
+    const trailSpeed = Math.hypot(coal.vx, coal.vy);
+    if (!reducedMotion && trailSpeed > 420 && !coal.held && !life.asleep) {
+      trails.push({ x: coal.x, y: coal.y, r: coal.r, angle: coal.angle, life: 0.22, max: 0.22 });
+      if (trails.length > 18) trails.shift();
+    }
+
     // Spontaneous "alive" wobble when calmly resting & awake.
     if (coal.grounded && !coal.held && !life.asleep && Math.random() < dt * 0.14) {
       const a = rand(0, TAU);
@@ -638,6 +648,7 @@
 
     stepParticles(sparks, dt, true);
     stepParticles(ash, dt, false);
+    stepTrails(dt);
     stepAmbient(dt);
 
     ambientTimer -= dt;
@@ -664,6 +675,12 @@
       if (p.life <= 0 || p.y < p.top) ambient.splice(i, 1);
     }
   }
+  function stepTrails(dt) {
+    for (let i = trails.length - 1; i >= 0; i--) {
+      trails[i].life -= dt;
+      if (trails[i].life <= 0) trails.splice(i, 1);
+    }
+  }
 
   // ---------------------------------------------------------------
   //  RENDERING
@@ -686,6 +703,7 @@
 
     ctx.fillStyle = COL.night;
     ctx.fillRect(0, 0, W, H);
+    drawBackdropDetails(warm);
 
     // Ambient warm bloom behind the pit
     const bloom = ctx.createRadialGradient(cx, floorCy, RX * 0.2, cx, floorCy, RX * 1.5);
@@ -703,6 +721,7 @@
     // visible — never clipped by the front stones.
     drawEmbers(pulse, warm);
     drawCoalShadow();
+    drawCoalTrail();
     drawCoal(pulse, warm);
     drawParticles();
     drawAmbient();           // floating sparks drift over everything
@@ -714,6 +733,41 @@
     vg.addColorStop(1, "rgba(0,0,0,0.42)");
     ctx.fillStyle = vg;
     ctx.fillRect(0, 0, W, H);
+  }
+
+  function drawBackdropDetails(warm) {
+    const { cx, floorCy, RX, RY } = scene;
+    ctx.save();
+    // A soft arched kiln alcove behind the hearth gives the pet a place,
+    // without adding UI clutter or a second scene.
+    const archW = RX * 1.65, archH = RY * 2.15;
+    const ax = cx, ay = floorCy - RY * 0.58;
+    const ag = ctx.createLinearGradient(0, ay - archH * 0.62, 0, ay + archH * 0.55);
+    ag.addColorStop(0, "rgba(41,25,19,0.38)");
+    ag.addColorStop(0.65, `rgba(85,42,24,${0.18 + warm * 0.09})`);
+    ag.addColorStop(1, "rgba(13,8,7,0)");
+    ctx.beginPath();
+    ctx.moveTo(ax - archW * 0.5, ay + archH * 0.38);
+    ctx.quadraticCurveTo(ax - archW * 0.48, ay - archH * 0.42, ax, ay - archH * 0.55);
+    ctx.quadraticCurveTo(ax + archW * 0.48, ay - archH * 0.42, ax + archW * 0.5, ay + archH * 0.38);
+    ctx.closePath();
+    ctx.fillStyle = ag;
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255,215,174,0.045)";
+    ctx.lineWidth = Math.max(1, RX * 0.006);
+    for (let i = 0; i < 7; i++) {
+      const y = ay - archH * 0.36 + i * archH * 0.12;
+      ctx.beginPath();
+      ctx.ellipse(ax, y, archW * (0.2 + i * 0.045), RY * 0.1, 0, Math.PI * 1.08, Math.PI * 1.92);
+      ctx.stroke();
+    }
+    // Low shelf-shadow under the pit to anchor the whole composition.
+    const sg = ctx.createRadialGradient(cx, floorCy + RY * 0.95, RX * 0.12, cx, floorCy + RY * 0.95, RX * 1.1);
+    sg.addColorStop(0, "rgba(0,0,0,0.42)");
+    sg.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = sg;
+    ctx.beginPath(); ctx.ellipse(cx, floorCy + RY * 0.95, RX * 1.1, RY * 0.32, 0, 0, TAU); ctx.fill();
+    ctx.restore();
   }
 
   // The elliptical ring of stones, split into far/near halves for depth.
@@ -884,6 +938,40 @@
       const gl = (0.25 + rng() * 0.5) * (0.4 + life.energy * 0.6);
       glowDot(x, y, rr, `rgba(255,${(120 + gl * 90) | 0},50,${gl})`, rr * 4);
     }
+
+    // A few fine rake lines in the ash add hand-drawn scale and calm motion.
+    ctx.save();
+    ctx.beginPath(); ellipse(cx, floorCy, floorRX, floorRY); ctx.clip();
+    ctx.strokeStyle = "rgba(255,240,220,0.08)";
+    ctx.lineWidth = Math.max(1, floorRX * 0.004);
+    for (let i = 0; i < 7; i++) {
+      const yy = floorCy + floorRY * (-0.55 + i * 0.17);
+      ctx.beginPath();
+      ctx.ellipse(cx + Math.sin(i) * floorRX * 0.05, yy, floorRX * (0.22 + i * 0.045), floorRY * 0.08, 0, 0.04 * Math.PI, 0.96 * Math.PI);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function drawCoalTrail() {
+    if (!trails.length) return;
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    for (const tr of trails) {
+      const a = clamp(tr.life / tr.max, 0, 1);
+      ctx.save();
+      ctx.translate(tr.x, tr.y);
+      ctx.rotate(tr.angle);
+      ctx.scale(1.08 + (1 - a) * 0.1, 0.92);
+      ctx.globalAlpha = a * 0.22;
+      const g = ctx.createRadialGradient(0, 0, tr.r * 0.12, 0, 0, tr.r * 1.25);
+      g.addColorStop(0, "rgba(255,184,83,0.95)");
+      g.addColorStop(1, "rgba(255,92,28,0)");
+      ctx.fillStyle = g;
+      ctx.beginPath(); blobPath(tr.r); ctx.fill();
+      ctx.restore();
+    }
+    ctx.restore();
   }
 
   function drawCoalShadow() {
